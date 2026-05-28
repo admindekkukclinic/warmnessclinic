@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  getRemainingInstallmentBalance,
+  getRemainingInstallmentMonths,
+} from "@/lib/expenseInstallments";
 
 type InventoryItem = {
   id: string;
@@ -13,6 +17,9 @@ type InventoryItem = {
 type MoneyRecord = {
   id: string;
   amount: number | string;
+  is_installment?: boolean | null;
+  installment_total_months?: number | null;
+  installment_current_month?: number | null;
   created_at?: string;
 };
 
@@ -121,7 +128,11 @@ export default function Home() {
         await Promise.all([
           supabase.from("inventory").select("id, name, quantity, created_at"),
           supabase.from("income").select("id, amount, created_at"),
-          supabase.from("expenses").select("id, amount, created_at"),
+          supabase
+            .from("expenses")
+            .select(
+              "id, amount, is_installment, installment_total_months, installment_current_month, created_at"
+            ),
         ]);
 
       const errors = [
@@ -204,6 +215,14 @@ export default function Home() {
   const totalIncome = getAmountTotal(dashboardData.incomeItems);
   const totalExpenses = getAmountTotal(dashboardData.expenseItems);
   const netProfit = totalIncome - totalExpenses;
+  const remainingInstallmentCount = dashboardData.expenseItems.reduce(
+    (sum, expense) => sum + getRemainingInstallmentMonths(expense),
+    0
+  );
+  const remainingInstallmentBalance = dashboardData.expenseItems.reduce(
+    (sum, expense) => sum + getRemainingInstallmentBalance(expense),
+    0
+  );
   const trendData = buildLastSevenDaysTrend(
     dashboardData.incomeItems,
     dashboardData.expenseItems
@@ -254,6 +273,20 @@ export default function Home() {
       helper: `${totalInventoryUnits} units in stock`,
       color: "text-violet-600",
       accent: "bg-violet-50",
+    },
+    {
+      label: "Installments Left",
+      value: `${remainingInstallmentCount} months`,
+      helper: "Remaining scheduled payments",
+      color: "text-indigo-600",
+      accent: "bg-indigo-50",
+    },
+    {
+      label: "Remaining Balance",
+      value: formatCurrency(remainingInstallmentBalance),
+      helper: "Installment balance due",
+      color: "text-orange-600",
+      accent: "bg-orange-50",
     },
   ];
 
@@ -311,7 +344,7 @@ export default function Home() {
         </div>
       )}
 
-      <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
         {summaryCards.map((card) => (
           <div
             key={card.label}

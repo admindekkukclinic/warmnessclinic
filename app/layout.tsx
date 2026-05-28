@@ -7,7 +7,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="th">
       <body>
 
         <div className="flex min-h-screen bg-gray-100">
@@ -16,7 +16,7 @@ export default function RootLayout({
           <aside className="w-64 bg-blue-700 text-white p-6">
 
             <h1 className="text-2xl font-bold mb-10">
-              Dental Clinic
+              คลินิกทันตกรรม
             </h1>
 
             <nav className="space-y-4">
@@ -25,28 +25,28 @@ export default function RootLayout({
                 href="/"
                 className="block hover:text-blue-200"
               >
-                Dashboard
+                แดชบอร์ด
               </Link>
 
               <Link
                 href="/income"
                 className="block hover:text-blue-200"
               >
-                Income
+                รายรับ
               </Link>
 
               <Link
                 href="/expenses"
                 className="block hover:text-blue-200"
               >
-                Expenses
+                รายจ่าย
               </Link>
 
               <Link
                 href="/inventory"
                 className="block hover:text-blue-200"
               >
-                Inventory
+                คลังสินค้า
               </Link>
 
             </nav>
