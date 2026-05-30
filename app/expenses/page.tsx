@@ -170,6 +170,7 @@ const LAB_FEE_DOCTOR_NAMES = [
   "ทพญ.กุลรวี อินประโคน",
   "ทพ.สันติ การรัมย์",
   "ทพญ.ปรางทิพย์ วรขจิต",
+  "ทพญ.ปวรา ลอรัตนเรืองกิต",
 ];
 
 const DOCTOR_FEE_TITLES = LAB_FEE_DOCTOR_NAMES;
