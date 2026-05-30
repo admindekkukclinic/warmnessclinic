@@ -94,6 +94,7 @@ const INSTALLMENT_CURRENT_MONTH_RULE_BY_TITLE: Record<
 };
 
 const ALL_INSTALLMENT_EXPENSES_VALUE = "__all_installment_expenses__";
+const INSTALLMENT_EXPENSE_CATEGORY = "รายการผ่อน";
 
 const MONTHLY_EXPENSE_CATEGORY = "รายจ่ายประจำ";
 const LEGACY_MONTHLY_EXPENSE_CATEGORY = "รายจ่ายประจำเดือน";
@@ -116,11 +117,14 @@ const MONTHLY_EXPENSE_TITLES = [
   "ค่าน้ำ",
   "ค่าอินเตอร์เน็ต",
   "ค่าโทรศัพท์",
-  "ค่าธรรมเนียมชำระบัตร",
+];
+
+const ONE_TIME_EXPENSE_TITLES = [
   "ค่าขยะติดเชื้อ",
-  "ค่า OT/ สวัสดิการพิเศษ",
+  "ค่าธรรมเนียมชำระบัตร",
   "ค่าภาษีป้าย",
   "ค่าภาษีโรงเรือน",
+  "ค่า OT/ สวัสดิการพิเศษ",
 ];
 
 const MONTHLY_EXPENSE_AMOUNT_BY_TITLE: Record<string, string> = {
@@ -128,6 +132,25 @@ const MONTHLY_EXPENSE_AMOUNT_BY_TITLE: Record<string, string> = {
   "ค่าจ้างพนักงานประจำ": "24000",
   "ค่าภาษีลูกจ้าง": "540",
   "หักเงินเข้ากองกลาง": "3000",
+};
+
+const getMonthlyExpenseAmountByTitle = (title: string) => {
+  const amount = Number.parseFloat(MONTHLY_EXPENSE_AMOUNT_BY_TITLE[title] ?? "0");
+
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const ZERO_AMOUNT_MONTHLY_EXPENSE_ORDER = [
+  "ค่าไฟฟ้า",
+  "ค่าน้ำ",
+  "ค่าอินเตอร์เน็ต",
+  "ค่าโทรศัพท์",
+];
+
+const getZeroAmountMonthlyExpenseOrder = (title: string | null) => {
+  const index = ZERO_AMOUNT_MONTHLY_EXPENSE_ORDER.indexOf(title ?? "");
+
+  return index === -1 ? ZERO_AMOUNT_MONTHLY_EXPENSE_ORDER.length : index;
 };
 
 const ALL_MONTHLY_EXPENSES_VALUE = "__all_monthly_expenses__";
@@ -249,6 +272,15 @@ const getResolvedInstallmentCurrentMonth = (
 
 const getPaymentDayFromDate = (paymentDate: string) =>
   Number.parseInt(paymentDate.slice(8, 10), 10);
+
+const getMonthAfterOffset = (month: string, offset: number) => {
+  const [year, monthIndex] = month.split("-").map(Number);
+  const date = new Date(year, monthIndex - 1 + offset, 1);
+
+  return `${date.getFullYear()}-${(date.getMonth() + 1)
+    .toString()
+    .padStart(2, "0")}`;
+};
 
 const getPaymentDateForMonth = (month: string, paymentDay: number) => {
   const [year, monthIndex] = month.split("-").map(Number);
@@ -588,12 +620,21 @@ export default function ExpensesPage() {
       return null;
     }
 
+    const startMonth = getMonthInputFromDate(paymentDate);
+
     return {
       title: title.trim(),
+      category: INSTALLMENT_EXPENSE_CATEGORY,
       monthly_amount: parsedMonthlyAmount,
       payment_date: paymentDate,
+      start_month: getPaymentDateForMonth(startMonth, 1),
+      end_month: getPaymentDateForMonth(
+        getMonthAfterOffset(startMonth, parsedTotalMonths - 1),
+        1
+      ),
       total_months: parsedTotalMonths,
       current_month: parsedCurrentMonths,
+      payment_day: getPaymentDayFromDate(paymentDate),
     };
   };
 
@@ -706,23 +747,35 @@ export default function ExpensesPage() {
       }
 
       const insertPayloads: RecurringExpensePayload[] = titlesToInsert.map(
-        (title) => ({
-          title,
-          monthly_amount: Number.parseFloat(
-            INSTALLMENT_MONTHLY_AMOUNT_BY_TITLE[title]
-          ),
-          total_months: Number.parseInt(
+        (title) => {
+          const totalMonths = Number.parseInt(
             INSTALLMENT_TOTAL_MONTHS_BY_TITLE[title],
             10
-          ),
-          current_month: Number.parseInt(
-            recurringPaidMonths ||
-              getInstallmentCurrentMonthByTitle(title, recurringPaymentDate) ||
-              "0",
-            10
-          ),
-          payment_date: recurringPaymentDate,
-        })
+          );
+          const startMonth = getMonthInputFromDate(recurringPaymentDate);
+
+          return {
+            title,
+            category: INSTALLMENT_EXPENSE_CATEGORY,
+            monthly_amount: Number.parseFloat(
+              INSTALLMENT_MONTHLY_AMOUNT_BY_TITLE[title]
+            ),
+            payment_date: recurringPaymentDate,
+            start_month: getPaymentDateForMonth(startMonth, 1),
+            end_month: getPaymentDateForMonth(
+              getMonthAfterOffset(startMonth, totalMonths - 1),
+              1
+            ),
+            total_months: totalMonths,
+            current_month: Number.parseInt(
+              recurringPaidMonths ||
+                getInstallmentCurrentMonthByTitle(title, recurringPaymentDate) ||
+                "0",
+              10
+            ),
+            payment_day: getPaymentDayFromDate(recurringPaymentDate),
+          };
+        }
       );
 
       const { error } = await supabase
@@ -764,10 +817,14 @@ export default function ExpensesPage() {
 
     const insertPayload: RecurringExpensePayload = {
       title: payload.title,
+      category: payload.category,
       monthly_amount: payload.monthly_amount,
+      payment_date: payload.payment_date,
+      start_month: payload.start_month,
+      end_month: payload.end_month,
       total_months: payload.total_months,
       current_month: payload.current_month,
-      payment_date: payload.payment_date,
+      payment_day: payload.payment_day,
     };
 
     const { error } = await supabase
@@ -811,7 +868,7 @@ export default function ExpensesPage() {
         title,
         category_id: null,
         category: MONTHLY_EXPENSE_CATEGORY,
-        amount: Number.parseFloat(MONTHLY_EXPENSE_AMOUNT_BY_TITLE[title]),
+        amount: getMonthlyExpenseAmountByTitle(title),
         expense_date: monthlyExpenseDate,
         is_installment: false,
         installment_total_months: null,
@@ -1324,9 +1381,27 @@ export default function ExpensesPage() {
       expense.category !== DOCTOR_FEE_LAB_CATEGORY &&
       expense.category !== LAB_FEE_CATEGORY
   );
-  const filteredMonthlyExpenses = filteredExpenses.filter(
-    (expense) => isMonthlyExpenseCategory(expense.category)
-  );
+  const filteredMonthlyExpenses = filteredExpenses
+    .filter((expense) => isMonthlyExpenseCategory(expense.category))
+    .sort((first, second) => {
+      const firstAmount = Number(first.amount || 0);
+      const secondAmount = Number(second.amount || 0);
+      const firstIsZero = firstAmount === 0;
+      const secondIsZero = secondAmount === 0;
+
+      if (firstIsZero !== secondIsZero) {
+        return firstIsZero ? 1 : -1;
+      }
+
+      if (firstIsZero && secondIsZero) {
+        return (
+          getZeroAmountMonthlyExpenseOrder(first.title) -
+          getZeroAmountMonthlyExpenseOrder(second.title)
+        );
+      }
+
+      return secondAmount - firstAmount;
+    });
   const filteredDoctorFeeExpenses = filteredExpenses.filter(
     (expense) => expense.category === DOCTOR_FEE_CATEGORY
   );
@@ -1422,14 +1497,24 @@ export default function ExpensesPage() {
     (expense.expense_date ?? "").startsWith(summaryMonth)
   );
 
-  const isRecurringPayment = (expense: Expense) =>
-    expense.expense_type === "recurring" || Boolean(expense.recurring_expense_id);
+  const monthlyInstallmentTotal = recurringExpenses
+    .filter((expense) => {
+      const startMonth = getRecurringStartMonth(expense);
+      const endMonth = expense.end_month?.slice(0, 7) ?? startMonth;
 
-  const monthlyTotalPaid = monthlyExpenses.reduce(
+      return (
+        expense.is_active !== false &&
+        startMonth <= summaryMonth &&
+        summaryMonth <= endMonth
+      );
+    })
+    .reduce((sum, expense) => sum + Number(expense.monthly_amount || 0), 0);
+
+  const monthlyRecurringTotal = monthlyExpenses.reduce(
     (sum, expense) =>
-      expense.category === DOCTOR_FEE_LAB_CATEGORY
-        ? sum
-        : sum + Number(expense.amount || 0),
+      isMonthlyExpenseCategory(expense.category)
+        ? sum + Number(expense.amount || 0)
+        : sum,
     0
   );
 
@@ -1451,6 +1536,24 @@ export default function ExpensesPage() {
         : sum,
     0
   );
+
+  const monthlyOneTimeTotal = monthlyExpenses.reduce(
+    (sum, expense) =>
+      !isMonthlyExpenseCategory(expense.category) &&
+      expense.category !== DOCTOR_FEE_CATEGORY &&
+      expense.category !== DOCTOR_FEE_LAB_CATEGORY &&
+      expense.category !== LAB_FEE_CATEGORY
+        ? sum + Number(expense.amount || 0)
+        : sum,
+    0
+  );
+
+  const monthlyTotalPaid =
+    monthlyInstallmentTotal +
+    monthlyRecurringTotal +
+    monthlyLabFeeTotal +
+    monthlyDoctorFeeTotal +
+    monthlyOneTimeTotal;
 
   const totalExpenses = expenses.reduce(
     (sum, expense) => sum + Number(expense.amount || 0),
@@ -1529,22 +1632,31 @@ export default function ExpensesPage() {
             </label>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 รวมรายจ่ายเดือนนี้
               </p>
-              <p className="mt-2 text-3xl font-bold text-slate-900">
+              <p className="mt-2 text-4xl font-bold text-red-600">
                 {formatCurrency(monthlyTotalPaid)}
               </p>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                รวมค่า DF สุทธิของทันตแพทย์
+                รวมรายการผ่อน
               </p>
               <p className="mt-2 text-3xl font-bold text-slate-900">
-                {formatCurrency(monthlyDoctorFeeTotal)}
+                {formatCurrency(monthlyInstallmentTotal)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                รวมรายจ่ายประจำ
+              </p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">
+                {formatCurrency(monthlyRecurringTotal)}
               </p>
             </div>
 
@@ -1556,82 +1668,27 @@ export default function ExpensesPage() {
                 {formatCurrency(monthlyLabFeeTotal)}
               </p>
             </div>
-          </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-6 py-4 font-semibold">วันที่</th>
-                <th className="px-6 py-4 font-semibold">รายการ</th>
-                <th className="px-6 py-4 font-semibold">ประเภท</th>
-                <th className="px-6 py-4 font-semibold">รายการ</th>
-                <th className="px-6 py-4 text-right font-semibold">จำนวนเงิน</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100">
-              {monthlyExpenses.map((expense) => {
-                const recurringPayment = isRecurringPayment(expense);
-
-                return (
-                  <tr key={expense.id} className="transition hover:bg-slate-50/80">
-                    <td className="px-6 py-5 text-sm font-medium text-slate-700">
-                      {formatDate(expense.expense_date)}
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <p className="font-semibold text-slate-900">
-                        {expense.title || getExpenseCategoryLabel(expense.category)}
-                      </p>
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                          recurringPayment
-                            ? "bg-indigo-50 text-indigo-700"
-                            : "bg-red-50 text-red-700"
-                        }`}
-                      >
-                        {recurringPayment ? "ผ่อน" : "ครั้งเดียว"}
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-5 text-sm font-medium text-slate-800">
-                      {getExpenseCategoryLabel(expense.category)}
-                    </td>
-
-                    <td className="px-6 py-5 text-right text-lg font-semibold text-slate-900">
-                      {formatCurrency(Number(expense.amount || 0))}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {isLoading && (
-          <div className="px-6 py-10 text-center text-sm font-medium text-slate-500">
-            กำลังโหลดสรุปรายเดือน...
-          </div>
-        )}
-
-        {!isLoading && monthlyExpenses.length === 0 && (
-          <div className="px-6 py-14 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl font-semibold text-slate-400">
-              +
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                รวม Doctor fee
+              </p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">
+                {formatCurrency(monthlyDoctorFeeTotal)}
+              </p>
             </div>
-            <h3 className="mt-4 text-base font-semibold text-slate-900">
-              ไม่พบรายการจ่ายในเดือนนี้
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              เพิ่มรายจ่ายครั้งเดียว หรือบันทึกการจ่ายของรายการผ่อน
-            </p>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                รวมรายจ่ายครั้งเดียว
+              </p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">
+                {formatCurrency(monthlyOneTimeTotal)}
+              </p>
+            </div>
           </div>
-        )}
+        </div>
+
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -1730,11 +1787,17 @@ export default function ExpensesPage() {
                 <div className="grid gap-3 lg:grid-cols-[1fr_180px_190px_auto]">
                   <input
                     type="text"
+                    list="one-time-expense-title-options"
                     placeholder="ชื่อรายการ"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-500 focus:ring-4 focus:ring-red-100"
                   />
+                  <datalist id="one-time-expense-title-options">
+                    {ONE_TIME_EXPENSE_TITLES.map((expenseTitle) => (
+                      <option key={expenseTitle} value={expenseTitle} />
+                    ))}
+                  </datalist>
 
                   <input
                     type="number"
@@ -1755,7 +1818,7 @@ export default function ExpensesPage() {
 
                   <button
                     onClick={addExpense}
-                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100"
+                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none xl:whitespace-nowrap"
                   >
                     เพิ่มรายจ่าย
                   </button>
@@ -1866,7 +1929,7 @@ export default function ExpensesPage() {
           ) : activeTab === "doctor_fee" ? (
             <>
               <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <div className="grid gap-3 lg:grid-cols-[1fr_220px_190px_auto]">
+                <div className="grid gap-3 xl:grid-cols-[260px_220px_190px_170px_auto]">
                   <select
                     aria-label="ชื่อ Doctor fee"
                     value={doctorFeeTitle}
@@ -1897,7 +1960,7 @@ export default function ExpensesPage() {
                     type="number"
                     min="0.01"
                     step="0.01"
-                    placeholder="Doctor fee ก่อนหัก"
+                    placeholder="รายรับของทันตแพทย์"
                     value={doctorFeeAmount}
                     onChange={(e) => setDoctorFeeAmount(e.target.value)}
                     className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-500 focus:ring-4 focus:ring-red-100"
@@ -1942,7 +2005,7 @@ export default function ExpensesPage() {
                   <button
                     onClick={addDoctorFee}
                     disabled={availableDoctorFeeTitles.length === 0}
-                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none xl:whitespace-nowrap"
                   >
                     เพิ่ม Doctor fee
                   </button>
@@ -2029,7 +2092,7 @@ export default function ExpensesPage() {
 
                   <button
                     onClick={addLabFee}
-                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100"
+                    className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none xl:whitespace-nowrap"
                   >
                     เพิ่มค่าแลป
                   </button>
@@ -2045,7 +2108,7 @@ export default function ExpensesPage() {
           ) : (
             <>
               <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <div className="grid gap-3 lg:grid-cols-[1fr_220px_180px_190px_170px]">
+                <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_160px_150px_150px_170px_auto]">
                   <select
                     aria-label="ชื่อรายการผ่อน"
                     value={recurringTitle}
@@ -2111,11 +2174,11 @@ export default function ExpensesPage() {
                   <input
                     type="number"
                     min="1"
-                    aria-label="จำนวนงวดทั้งหมด"
+                    aria-label="งวดทั้งหมด"
                     placeholder={
                       recurringTitle === ALL_INSTALLMENT_EXPENSES_VALUE
                         ? "ใช้จำนวนงวดอัตโนมัติ"
-                        : "จำนวนงวดทั้งหมด"
+                        : "งวดทั้งหมด"
                     }
                     value={recurringTotalMonths}
                     onChange={(e) => setRecurringTotalMonths(e.target.value)}
@@ -2174,9 +2237,6 @@ export default function ExpensesPage() {
                       className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-28 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-500 focus:ring-4 focus:ring-red-100"
                     />
                   </div>
-                </div>
-
-                <div className="mt-4 flex justify-end">
                   <button
                     onClick={addRecurringExpense}
                     disabled={availableInstallmentExpenseTitles.length === 0}
@@ -2348,15 +2408,15 @@ export default function ExpensesPage() {
                   <tr>
                     <th className="px-6 py-4 font-semibold">รายการ</th>
                     <th className="px-6 py-4 font-semibold">
-                      Doctor fee ก่อนหัก
+                      รายรับของทันตแพทย์
                     </th>
                     <th className="px-6 py-4 font-semibold">
                       รวมค่าแลปของคนไข้
                     </th>
                     <th className="px-6 py-4 font-semibold">
-                      หักค่าแลปหมอ 50%
+                      หักค่าแลป 50%
                     </th>
-                    <th className="px-6 py-4 font-semibold">ยอดจ่ายสุทธิ</th>
+                    <th className="px-6 py-4 font-semibold text-red-600">Doctor Fee</th>
                     <th className="px-6 py-4 font-semibold">วันที่จ่าย</th>
                     <th className="px-6 py-4 text-right font-semibold">
                       จัดการ
@@ -2447,7 +2507,7 @@ export default function ExpensesPage() {
                         </td>
 
                         <td className="px-6 py-5">
-                          <span className="text-lg font-semibold text-slate-900">
+                          <span className="text-lg font-bold text-red-600">
                             {formatCurrency(
                               isEditingDoctorFee
                                 ? editBreakdown.netAmount
@@ -2677,8 +2737,8 @@ export default function ExpensesPage() {
                               <input
                                 type="number"
                                 min="1"
-                                aria-label="จำนวนงวดทั้งหมด"
-                                placeholder="จำนวนงวดทั้งหมด"
+                                aria-label="งวดทั้งหมด"
+                                placeholder="งวดทั้งหมด"
                                 value={editRecurringTotalMonths}
                                 onChange={(event) =>
                                   setEditRecurringTotalMonths(

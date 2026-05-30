@@ -43,8 +43,12 @@ export type RecurringExpense = {
 
 export type RecurringExpensePayload = {
   title: string;
+  category: string;
   monthly_amount: number;
   payment_date: string;
+  start_month: string;
+  end_month: string;
   total_months: number;
   current_month: number;
+  payment_day: number;
 };
